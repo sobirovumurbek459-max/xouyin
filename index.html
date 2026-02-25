@@ -2,541 +2,514 @@
 <html lang="uz">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>X & O Legend - Battle Edition</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>X & O Legend: Ultimate Pro</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
-        
-        body {
-            font-family: 'Inter', sans-serif;
-            overflow-x: hidden;
-            -webkit-tap-highlight-color: transparent;
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;700;800&display=swap');
+        body { font-family: 'Plus Jakarta Sans', sans-serif; background: #020617; color: #f8fafc; overflow: hidden; touch-action: manipulation; }
+        .grid-cell { transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); position: relative; }
+        .grid-cell:active { transform: scale(0.9); }
+        .boss-card { animation: boss-glow 2s infinite; border: 2px solid #ef4444 !important; }
+        @keyframes boss-glow {
+            0%, 100% { box-shadow: 0 0 10px rgba(239, 68, 68, 0.3); }
+            50% { box-shadow: 0 0 30px rgba(239, 68, 68, 0.6); }
         }
-
-        .neon-text {
-            text-shadow: 0 0 10px rgba(34, 211, 238, 0.8), 0 0 20px rgba(34, 211, 238, 0.4);
-        }
-
-        .grid-cell {
-            aspect-ratio: 1 / 1;
-        }
-
-        /* Custom Scrollbar */
-        ::-webkit-scrollbar { width: 4px; }
-        ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: rgba(99, 102, 241, 0.5); border-radius: 10px; }
-
-        .animate-pop { animation: pop 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
-        @keyframes pop {
-            0% { transform: scale(0.5); opacity: 0; }
-            100% { transform: scale(1); opacity: 1; }
-        }
-
-        .boss-shake { animation: shake 0.5s infinite; }
-        @keyframes shake {
-            0%, 100% { transform: translateX(0); }
-            25% { transform: translateX(-2px); }
-            75% { transform: translateX(2px); }
-        }
+        .win-animate { background: #4f46e5 !important; animation: win-pulse 0.8s infinite; }
+        @keyframes win-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.05); } }
+        .player-active-glow { ring: 4px solid #6366f1; background: rgba(99, 102, 241, 0.1); }
+        .art-active { border-color: #f59e0b !important; background: rgba(245, 158, 11, 0.2); transform: scale(1.1); }
+        .setup-btn-active { background: #4f46e5 !important; border-color: #818cf8 !important; }
     </style>
 </head>
-<body class="transition-colors duration-500">
-    <div id="app"></div>
+<body>
+    <div id="app" class="h-screen max-w-md mx-auto flex flex-col bg-slate-950 relative">
+        <div id="ui" class="flex-1 flex flex-col p-4 overflow-y-auto">
+            <!-- Dinamik UI -->
+        </div>
+    </div>
 
     <script>
-        // --- KONSTANTALAR ---
+        // --- MA'LUMOTLAR VA HOLAT ---
         const BOSS_LEVELS = [5, 10, 15, 20, 25, 30];
-        const PRICES = {
-            standard: { eraser: 30, freeze: 50, shield: 40, zap: 80 },
-            elite: { eraser: 40, freeze: 60, shield: 50, zap: 100, meteor: 150, rewind: 130, ghost: 180 }
+        const DIFFICULTIES = ['OSON', 'O\'RTA', 'QIYIN', 'PRO', 'IMKONSIZ'];
+        const PRICES = { eraser: 40, freeze: 60, shield: 50, meteor: 150 };
+
+        let state = JSON.parse(localStorage.getItem('xo_legend_pro_v1')) || {
+            view: 'menu',
+            coins: 100,
+            unlockedLevel: 1,
+            inventory: { eraser: 2, freeze: 1, shield: 1, meteor: 0 },
+            multiData: {
+                coinsX: 100, coinsO: 100,
+                invX: { eraser: 1, freeze: 1, shield: 1, meteor: 0 },
+                invO: { eraser: 1, freeze: 1, shield: 1, meteor: 0 }
+            }
         };
 
-        // --- GLOBAL HOLAT ---
-        let state = {
-            view: 'menu',
-            gameMode: 'battle',
-            settings: { music: false, theme: 'dark', icons: 'classic' },
-            currentLevel: 1,
-            bossHP: 3,
+        let game = {
+            mode: 'battle', // battle, robot, multi
+            level: 1,
+            diff: 'O\'RTA',
             gridSize: 3,
             board: [],
-            history: [],
             isXNext: true,
-            winnerInfo: null,
-            turnCount: 0,
-            frozenPlayer: null,
+            winner: null,
+            bossHP: 0,
+            maxBossHP: 0,
+            frozen: null,
             shielded: [],
-            activeArtifact: null,
-            
-            // Profillar
-            battleProfile: { coins: 250, unlockedLevel: 1, inventory: { eraser: 3, freeze: 2, shield: 2, zap: 1, meteor: 1, rewind: 1, ghost: 0 } },
-            multiProfile: { coinsX: 100, coinsO: 100, invX: { eraser: 1, freeze: 1, shield: 1, zap: 0 }, invO: { eraser: 1, freeze: 1, shield: 1, zap: 0 } },
-            pveProfile: { coins: 100, inventory: { eraser: 1, freeze: 1, shield: 1, zap: 0 } }
+            activeArt: null,
+            isThinking: false
         };
 
-        // --- MANTIQIY FUNKSIYALAR ---
-        function getWinLength(size) { return size === 3 ? 3 : 4; }
+        // Setup uchun vaqtinchalik tanlovlar
+        let setupTemp = { size: 3, diff: 'O\'RTA' };
 
-        function checkWinner(squares, size, winLen) {
-            const dirs = [[0, 1], [1, 0], [1, 1], [1, -1]];
-            for (let r = 0; r < size; r++) {
-                for (let c = 0; c < size; c++) {
-                    let player = squares[r * size + c];
-                    if (!player) continue;
-                    for (let [dr, dc] of dirs) {
-                        let count = 1;
-                        let line = [r * size + c];
-                        for (let step = 1; step < winLen; step++) {
-                            let nr = r + dr * step, nc = c + dc * step;
-                            if (nr >= 0 && nr < size && nc >= 0 && nc < size && squares[nr * size + nc] === player) {
-                                count++; line.push(nr * size + nc);
+        function save() {
+            localStorage.setItem('xo_legend_pro_v1', JSON.stringify(state));
+        }
+
+        // --- NAVIGATSIYA ---
+        window.nav = (v) => { state.view = v; render(); };
+
+        window.startLevel = (lvl) => {
+            game.mode = 'battle';
+            game.level = lvl;
+            game.gridSize = lvl <= 10 ? 3 : lvl <= 20 ? 4 : 5;
+            game.diff = lvl <= 5 ? 'O\'RTA' : lvl <= 15 ? 'QIYIN' : 'PRO';
+            game.maxBossHP = BOSS_LEVELS.includes(lvl) ? 3 : 0;
+            game.bossHP = game.maxBossHP;
+            initGame();
+        };
+
+        window.startRobotMode = () => {
+            game.mode = 'robot';
+            game.gridSize = setupTemp.size;
+            game.diff = setupTemp.diff;
+            game.bossHP = 0;
+            initGame();
+        };
+
+        window.startMultiMode = () => {
+            game.mode = 'multi';
+            game.gridSize = setupTemp.size;
+            game.diff = 'MULTIPLAYER';
+            game.bossHP = 0;
+            initGame();
+        };
+
+        function initGame() {
+            game.board = Array(game.gridSize * game.gridSize).fill(null);
+            game.isXNext = true;
+            game.winner = null;
+            game.frozen = null;
+            game.shielded = [];
+            game.activeArt = null;
+            game.isThinking = false;
+            state.view = 'game';
+            render();
+        }
+
+        // --- O'YIN MANTIQLARI ---
+        window.cellClick = (i) => {
+            if (game.winner || game.isThinking) return;
+
+            // Artefakt mantiqi
+            if (game.activeArt) {
+                applyArtLogic(i);
+                return;
+            }
+
+            if (game.board[i]) return;
+
+            game.board[i] = game.isXNext ? 'X' : 'O';
+            const res = checkWin(game.board, game.gridSize);
+
+            if (res) {
+                game.winner = res;
+            } else {
+                switchTurn();
+            }
+            render();
+        };
+
+        function applyArtLogic(i) {
+            const p = game.isXNext ? 'X' : 'O';
+            const opp = game.isXNext ? 'O' : 'X';
+            const inv = game.mode === 'multi' ? (p === 'X' ? state.multiData.invX : state.multiData.invO) : state.inventory;
+
+            if (game.activeArt === 'eraser' && game.board[i] === opp && !game.shielded.includes(i)) {
+                game.board[i] = null;
+                inv.eraser--;
+            } else if (game.activeArt === 'shield' && game.board[i] === p && !game.shielded.includes(i)) {
+                game.shielded.push(i);
+                inv.shield--;
+            }
+            game.activeArt = null;
+            render();
+        }
+
+        function switchTurn() {
+            const nextP = game.isXNext ? 'O' : 'X';
+            if (game.frozen === nextP) {
+                game.frozen = null;
+            } else {
+                game.isXNext = !game.isXNext;
+                if (!game.isXNext && game.mode !== 'multi') {
+                    game.isThinking = true;
+                    setTimeout(robotMove, 700);
+                }
+            }
+        }
+
+        function checkWin(board, size) {
+            const winLen = size === 3 ? 3 : 4;
+            const dirs = [[0,1],[1,0],[1,1],[1,-1]];
+            for(let r=0; r<size; r++) {
+                for(let c=0; c<size; c++) {
+                    const p = board[r*size+c];
+                    if(!p) continue;
+                    for(let [dr, dc] of dirs) {
+                        let count = 1, line = [r*size+c];
+                        for(let s=1; s<winLen; s++) {
+                            const nr=r+dr*s, nc=c+dc*s;
+                            if(nr>=0 && nr<size && nc>=0 && nc<size && board[nr*size+nc]===p) {
+                                count++; line.push(nr*size+nc);
                             } else break;
                         }
-                        if (count === winLen) return { winner: player, line };
+                        if(count === winLen) return { p, line };
                     }
                 }
             }
-            if (!squares.includes(null)) return { winner: 'Draw', line: [] };
+            if(!board.includes(null)) return { p: 'Durang', line: [] };
             return null;
         }
 
-        function getAIMove(squares, size, winLen) {
-            const empty = squares.map((v, i) => (v === null ? i : null)).filter((v) => v !== null);
-            if (empty.length === 0) return null;
-            const checkMove = (p, len) => {
-                for (let i of empty) {
-                    const temp = [...squares]; temp[i] = p;
-                    if (checkWinner(temp, size, len)?.winner === p) return i;
-                }
-                return null;
-            };
-            const winMove = checkMove('O', winLen);
-            if (winMove !== null) return winMove;
-            const blockMove = checkMove('X', winLen);
-            if (blockMove !== null) return blockMove;
-            return empty[Math.floor(Math.random() * empty.length)];
-        }
+        // --- ROBOT AI ---
+        function robotMove() {
+            if (game.winner) { game.isThinking = false; return; }
+            const empty = game.board.map((v, i) => v === null ? i : null).filter(v => v !== null);
+            if (empty.length === 0) { game.isThinking = false; return; }
 
-        // --- BOSHQARUV ---
-        function setView(v) { state.view = v; render(); }
-
-        function startNewGame(mode, lvl = 1) {
-            state.gameMode = mode;
-            state.currentLevel = lvl;
-            state.gridSize = mode === 'battle' ? (lvl <= 10 ? 3 : lvl <= 20 ? 4 : 5) : 3;
-            state.board = Array(state.gridSize * state.gridSize).fill(null);
-            state.history = [];
-            state.isXNext = true;
-            state.winnerInfo = null;
-            state.turnCount = 0;
-            state.shielded = [];
-            state.activeArtifact = null;
-            state.frozenPlayer = null;
-            if (BOSS_LEVELS.includes(lvl)) state.bossHP = 3;
-            state.view = 'playing';
-            render();
-        }
-
-        function handleMove(i, isHuman = true) {
-            if (state.winnerInfo) return;
-            const p = state.isXNext ? 'X' : 'O';
-            const opp = state.isXNext ? 'O' : 'X';
-
-            // Artifakt Logic
-            if (state.activeArtifact === 'eraser' && isHuman) {
-                if (state.board[i] === opp && !state.shielded.includes(i)) {
-                    state.board[i] = null;
-                    updateInventory(p, 'eraser', -1);
-                    state.activeArtifact = null;
-                    render();
-                    return;
-                }
-            }
-            if (state.activeArtifact === 'shield' && isHuman) {
-                if (state.board[i] === p && !state.shielded.includes(i)) {
-                    state.shielded.push(i);
-                    updateInventory(p, 'shield', -1);
-                    state.activeArtifact = null;
-                    render();
-                    return;
-                }
-            }
-
-            if (state.board[i]) return;
-
-            state.history.push([...state.board]);
-            state.board[i] = p;
-            state.turnCount++;
-
-            const winLen = getWinLength(state.gridSize);
-            const result = checkWinner(state.board, state.gridSize, winLen);
-
-            if (result) {
-                state.winnerInfo = result;
-                if (result.winner === 'X') processVictory();
-            } else {
-                if (state.frozenPlayer === opp) state.frozenPlayer = null;
-                else state.isXNext = !state.isXNext;
-            }
-            render();
-
-            // AI Move
-            if (state.view === 'playing' && !state.isXNext && !state.winnerInfo && state.gameMode !== 'multiplayer') {
-                setTimeout(() => {
-                    const move = getAIMove(state.board, state.gridSize, getWinLength(state.gridSize));
-                    if (move !== null) handleMove(move, false);
-                }, 800);
-            }
-        }
-
-        function processVictory() {
-            const reward = state.currentLevel * 10 + (BOSS_LEVELS.includes(state.currentLevel) ? 50 : 0);
-            if (state.gameMode === 'battle') {
-                if (BOSS_LEVELS.includes(state.currentLevel)) {
-                    state.bossHP--;
-                    if (state.bossHP > 0) {
-                        setTimeout(() => {
-                            state.board = Array(state.gridSize * state.gridSize).fill(null);
-                            state.winnerInfo = null;
-                            state.isXNext = true;
-                            render();
-                        }, 1500);
+            // Impossible: AI uses Eraser
+            if (game.diff === 'IMKONSIZ' && Math.random() > 0.7) {
+                const xCells = game.board.map((v,i) => v==='X' ? i : null).filter(v => v!==null);
+                if (xCells.length >= 3) {
+                    const target = xCells[Math.floor(Math.random() * xCells.length)];
+                    if (!game.shielded.includes(target)) {
+                        game.board[target] = null;
+                        game.isThinking = false;
+                        render();
+                        switchTurn();
                         return;
                     }
                 }
-                state.battleProfile.coins += reward;
-                state.battleProfile.unlockedLevel = Math.max(state.battleProfile.unlockedLevel, state.currentLevel + 1);
-            } else if (state.gameMode === 'multiplayer') {
-                state.multiProfile.coinsX += 40;
-            } else {
-                state.pveProfile.coins += 30;
             }
-        }
 
-        function updateInventory(player, item, amount) {
-            if (state.gameMode === 'battle') {
-                state.battleProfile.inventory[item] += amount;
-            } else if (state.gameMode === 'multiplayer') {
-                const profile = player === 'X' ? state.multiProfile.invX : state.multiProfile.invO;
-                profile[item] += amount;
-            } else {
-                state.pveProfile.inventory[item] += amount;
-            }
-        }
-
-        function usePower(p, owner) {
-            const currentPlayer = state.isXNext ? 'X' : 'O';
-            if (owner !== currentPlayer || state.winnerInfo) return;
-
-            const inv = state.gameMode === 'battle' ? state.battleProfile.inventory : 
-                        state.gameMode === 'multiplayer' ? (owner === 'X' ? state.multiProfile.invX : state.multiProfile.invO) : 
-                        state.pveProfile.inventory;
-
-            if (inv[p] <= 0) return;
-
-            if (p === 'eraser' || p === 'shield') {
-                state.activeArtifact = (state.activeArtifact === p) ? null : p;
-            } else if (p === 'freeze') {
-                state.frozenPlayer = (state.isXNext ? 'O' : 'X');
-                updateInventory(owner, 'freeze', -1);
-            } else if (p === 'rewind' && state.history.length > 0) {
-                state.board = state.history.pop();
-                updateInventory(owner, 'rewind', -1);
-            } else if (p === 'meteor') {
-                const opp = owner === 'X' ? 'O' : 'X';
-                const oppCells = state.board.map((v, i) => v === opp ? i : null).filter(v => v !== null);
-                if (oppCells.length > 0) {
-                    const r = Math.floor(Math.random() * oppCells.length);
-                    state.board[oppCells[r]] = null;
-                    updateInventory(owner, 'meteor', -1);
+            let move = empty[Math.floor(Math.random() * empty.length)];
+            if (game.diff !== 'OSON') {
+                // Win check
+                for (let i of empty) {
+                    let test = [...game.board]; test[i] = 'O';
+                    if (checkWin(test, game.gridSize)?.p === 'O') { move = i; break; }
+                }
+                // Block check
+                if (game.board[move] !== 'O' && game.diff !== 'OSON') {
+                    for (let i of empty) {
+                        let test = [...game.board]; test[i] = 'X';
+                        if (checkWin(test, game.gridSize)?.p === 'X') { move = i; break; }
+                    }
                 }
             }
+
+            game.board[move] = 'O';
+            const winRes = checkWin(game.board, game.gridSize);
+            if (winRes) game.winner = winRes;
+            else game.isXNext = true;
+
+            game.isThinking = false;
             render();
         }
 
-        function buyItem(player, item, price) {
-            let profile = state.gameMode === 'battle' ? state.battleProfile : 
-                          state.gameMode === 'multiplayer' ? state.multiProfile : state.pveProfile;
-            
-            if (state.gameMode === 'multiplayer') {
-                const coinsKey = player === 'X' ? 'coinsX' : 'coinsO';
-                const invKey = player === 'X' ? 'invX' : 'invO';
-                if (profile[coinsKey] >= price) {
-                    profile[coinsKey] -= price;
-                    profile[invKey][item]++;
+        // --- PROGRESSION & BOSS ---
+        window.handleContinue = () => {
+            if (game.winner?.p === 'X' && game.bossHP > 1) {
+                game.bossHP--;
+                initGame();
+                return;
+            }
+
+            if (game.winner?.p === 'X') {
+                if (game.mode === 'battle') {
+                    state.coins += game.level * 30;
+                    if (game.level >= state.unlockedLevel) state.unlockedLevel = game.level + 1;
+                } else if (game.mode === 'robot') {
+                    state.coins += 40;
+                } else if (game.mode === 'multi') {
+                    state.multiData.coinsX += 50;
+                }
+            } else if (game.winner?.p === 'O' && game.mode === 'multi') {
+                state.multiData.coinsO += 50;
+            }
+
+            save();
+            nav(game.mode === 'battle' ? 'map' : 'menu');
+        };
+
+        // --- SHOP & ARTEFAKTLAR ---
+        window.useArt = (art, player = null) => {
+            if (game.isThinking || game.winner) return;
+            const currentP = game.isXNext ? 'X' : 'O';
+            if (player && player !== currentP) return;
+
+            const inv = game.mode === 'multi' ? (currentP === 'X' ? state.multiData.invX : state.multiData.invO) : state.inventory;
+            if (inv[art] > 0) {
+                if (art === 'eraser' || art === 'shield') {
+                    game.activeArt = game.activeArt === art ? null : art;
+                } else if (art === 'freeze') {
+                    game.frozen = game.isXNext ? 'O' : 'X';
+                    inv.freeze--;
+                    game.activeArt = null;
+                }
+                render();
+            }
+        };
+
+        window.buy = (item, player = 'X') => {
+            const price = PRICES[item];
+            if (game.mode === 'multi') {
+                const cKey = player === 'X' ? 'coinsX' : 'coinsO';
+                const iKey = player === 'X' ? 'invX' : 'invO';
+                if (state.multiData[cKey] >= price) {
+                    state.multiData[cKey] -= price;
+                    state.multiData[iKey][item]++;
                 }
             } else {
-                if (profile.coins >= price) {
-                    profile.coins -= price;
-                    profile.inventory[item]++;
+                if (state.coins >= price) {
+                    state.coins -= price;
+                    state.inventory[item]++;
                 }
             }
-            render();
-        }
+            save(); render();
+        };
 
-        // --- RENDERER ---
-        function getThemeClasses() {
-            if (state.settings.theme === 'light') return "bg-slate-50 text-slate-900 border-slate-200";
-            if (state.settings.theme === 'neon') return "bg-black text-cyan-400 border-cyan-900";
-            return "bg-slate-900 text-slate-100 border-slate-800";
-        }
-
-        function getIcon(val, size = 32) {
-            if (!val) return '';
-            const isX = val === 'X';
-            const color = isX ? "text-blue-500" : "text-red-500";
-            let iconName = isX ? "x" : "circle";
-            
-            if (state.settings.icons === 'fantasy') iconName = isX ? "swords" : "shield-alert";
-            if (state.settings.icons === 'elements') {
-                return isX ? `<i data-lucide="flame" class="text-orange-500" style="width:${size}px;height:${size}px"></i>` : 
-                             `<i data-lucide="droplets" class="text-blue-500" style="width:${size}px;height:${size}px"></i>`;
-            }
-            return `<i data-lucide="${iconName}" class="${color}" style="width:${size}px;height:${size}px"></i>`;
-        }
-
+        // --- RENDERING ---
         function render() {
-            const app = document.getElementById('app');
-            const theme = getThemeClasses();
-            document.body.className = theme.split(' ')[0];
+            const ui = document.getElementById('ui');
+            let html = '';
 
             if (state.view === 'menu') {
-                app.innerHTML = `
-                    <div class="min-h-screen flex flex-col items-center justify-center p-6 ${theme}">
-                        <h1 class="text-5xl md:text-7xl font-black italic mb-12 bg-clip-text text-transparent bg-gradient-to-br from-blue-400 to-indigo-600 text-center uppercase">X & O Legend</h1>
-                        <div class="w-full max-w-sm space-y-4">
-                            <button onclick="setView('map')" class="w-full bg-indigo-600 p-6 rounded-3xl shadow-xl flex items-center justify-between font-black text-white hover:scale-105 transition-all">
-                                KOMPANIYA (30 LVL) <i data-lucide="map"></i>
-                            </button>
-                            <button onclick="startNewGame('multiplayer')" class="w-full bg-white/5 p-5 border-2 border-current rounded-3xl flex items-center justify-between font-bold hover:bg-white/10 transition-all">
-                                MULTIPLAYER <i data-lucide="users"></i>
-                            </button>
-                            <button onclick="startNewGame('pve')" class="w-full bg-white/5 p-5 border-2 border-current rounded-3xl flex items-center justify-between font-bold hover:bg-white/10 transition-all">
-                                VS ROBOT <i data-lucide="cpu"></i>
-                            </button>
-                            <button onclick="setView('settings')" class="w-full p-4 bg-white/5 border-2 border-current/10 rounded-2xl font-bold opacity-60 flex items-center justify-center gap-2">
-                                <i data-lucide="settings" size="20"></i> SOZLAMALAR
-                            </button>
+                html = `
+                    <div class="flex-1 flex flex-col items-center justify-center space-y-10 animate-in fade-in">
+                        <div class="text-center">
+                            <h1 class="text-7xl font-black italic bg-clip-text text-transparent bg-gradient-to-tr from-blue-500 to-indigo-500">X & O</h1>
+                            <p class="text-[10px] font-bold tracking-[0.4em] opacity-30 uppercase tracking-widest">PRO EDITION</p>
                         </div>
-                    </div>
-                `;
-            } else if (state.view === 'settings') {
-                app.innerHTML = `
-                    <div class="min-h-screen p-8 ${theme}">
-                        <div class="max-w-md mx-auto">
-                            <button onclick="setView('menu')" class="mb-8 font-black flex items-center gap-2 opacity-50"><i data-lucide="home"></i> MENYU</button>
-                            <h2 class="text-4xl font-black mb-10 uppercase italic">Sozlamalar</h2>
-                            <div class="space-y-6">
-                                <div class="bg-white/5 p-6 rounded-3xl">
-                                    <h3 class="text-xs font-black opacity-40 uppercase mb-4">Mavzu</h3>
-                                    <div class="flex gap-2">
-                                        ${['light', 'dark', 'neon'].map(t => `
-                                            <button onclick="state.settings.theme='${t}'; render()" class="flex-1 py-3 rounded-2xl font-black uppercase text-[10px] border-2 transition-all ${state.settings.theme === t ? 'border-blue-500 bg-blue-500/10' : 'border-transparent bg-white/5'}">${t}</button>
-                                        `).join('')}
-                                    </div>
-                                </div>
-                                <div class="bg-white/5 p-6 rounded-3xl">
-                                    <h3 class="text-xs font-black opacity-40 uppercase mb-4">Ramzlar</h3>
-                                    <div class="grid grid-cols-3 gap-2">
-                                        ${['classic', 'fantasy', 'elements'].map(s => `
-                                            <button onclick="state.settings.icons='${s}'; render()" class="p-4 rounded-2xl border-2 font-black uppercase text-[10px] transition-all ${state.settings.icons === s ? 'border-blue-500 bg-blue-500/10' : 'border-transparent bg-white/5'}">${s}</button>
-                                        `).join('')}
-                                    </div>
-                                </div>
+                        <div class="w-full space-y-4">
+                            <button onclick="nav('map')" class="w-full bg-indigo-600 p-6 rounded-[2rem] font-black text-xl shadow-xl flex items-center justify-between hover:scale-105 transition-transform">KOMPANIYA <i data-lucide="map"></i></button>
+                            <button onclick="nav('setup_robot')" class="w-full bg-slate-900 border border-white/5 p-5 rounded-[2rem] font-bold flex items-center justify-between">ROBOT BILAN <i data-lucide="cpu"></i></button>
+                            <button onclick="nav('setup_multi')" class="w-full bg-slate-900 border border-white/5 p-5 rounded-[2rem] font-bold flex items-center justify-between text-indigo-400">MULTIPLAYER <i data-lucide="users"></i></button>
+                            <div class="grid grid-cols-2 gap-3">
+                                <button onclick="nav('shop')" class="p-4 bg-slate-900 border border-white/5 rounded-3xl font-bold flex items-center justify-center gap-2"><i data-lucide="shopping-cart" class="w-4"></i> DO'KON</button>
+                                <button onclick="if(confirm('Progressni o\\'chirasizmi?')){localStorage.clear(); location.reload();}" class="p-4 bg-slate-900 border border-white/5 rounded-3xl font-bold flex items-center justify-center gap-2 text-red-400"><i data-lucide="trash-2" class="w-4"></i> O'CHIRISH</button>
                             </div>
                         </div>
                     </div>
                 `;
             } else if (state.view === 'map') {
-                app.innerHTML = `
-                    <div class="min-h-screen p-6 overflow-y-auto ${theme}">
-                        <div class="max-w-md mx-auto">
-                            <button onclick="setView('menu')" class="mb-6 font-black opacity-50 flex items-center gap-2"><i data-lucide="home"></i> MENYU</button>
-                            <div class="flex items-center justify-between mb-8">
-                                <h2 class="text-4xl font-black italic uppercase">Xarita</h2>
-                                <div class="flex items-center gap-2 bg-yellow-500/20 px-4 py-2 rounded-full font-black text-yellow-500"><i data-lucide="coins"></i> ${state.battleProfile.coins}</div>
-                            </div>
-                            <div class="grid gap-3 pb-10">
-                                ${Array.from({ length: 30 }, (_, i) => i + 1).map(lvl => {
-                                    const locked = lvl > state.battleProfile.unlockedLevel;
-                                    const isBoss = BOSS_LEVELS.includes(lvl);
-                                    return `
-                                        <button ${locked ? 'disabled' : ''} onclick="startNewGame('battle', ${lvl})" class="w-full p-6 rounded-3xl border-4 flex items-center justify-between transition-all ${locked ? 'opacity-20 border-slate-800' : isBoss ? 'border-red-600 bg-red-600/10' : 'border-indigo-500 bg-indigo-500/5'}">
-                                            <div class="flex items-center gap-4">
-                                                <span class="text-3xl font-black">${lvl}</span>
-                                                <span class="font-black uppercase">${isBoss ? "BOSS" : "BOSQICH"}</span>
-                                            </div>
-                                            ${isBoss ? `<i data-lucide="skull" class="${locked ? '' : 'text-red-500'}"></i>` : `<i data-lucide="chevron-right"></i>`}
-                                        </button>
-                                    `;
-                                }).join('')}
-                            </div>
+                html = `
+                    <div class="flex flex-col h-full animate-in slide-in-from-right">
+                        <div class="flex items-center justify-between mb-8">
+                            <button onclick="nav('menu')" class="p-3 bg-slate-900 rounded-full"><i data-lucide="arrow-left"></i></button>
+                            <div class="bg-yellow-500/10 text-yellow-500 px-5 py-2 rounded-full font-black flex items-center gap-2"><i data-lucide="coins" class="w-4"></i> ${state.coins}</div>
+                        </div>
+                        <h2 class="text-4xl font-black mb-6 italic uppercase tracking-tighter">Xarita</h2>
+                        <div class="grid gap-3 overflow-y-auto pb-10 pr-1">
+                            ${Array.from({length: 30}, (_, i) => i + 1).map(l => {
+                                const locked = l > state.unlockedLevel;
+                                const isBoss = BOSS_LEVELS.includes(l);
+                                return `
+                                    <button ${locked ? 'disabled' : `onclick="startLevel(${l})"`} class="p-6 rounded-[2.5rem] border-4 flex items-center justify-between transition-all ${locked ? 'opacity-10' : isBoss ? 'boss-card bg-red-600/10' : 'border-indigo-600 bg-indigo-600/5'}">
+                                        <div class="flex items-center gap-5">
+                                            <span class="text-4xl font-black">${l}</span>
+                                            <div class="text-left"><div class="text-[10px] font-bold opacity-50 uppercase">${isBoss ? 'Boss' : 'Level'}</div><div class="font-bold">BATTLE</div></div>
+                                        </div>
+                                        ${locked ? '<i data-lucide="lock" class="w-5"></i>' : isBoss ? '<i data-lucide="skull" class="text-red-500 w-8 h-8"></i>' : '<i data-lucide="chevron-right"></i>'}
+                                    </button>
+                                `;
+                            }).join('')}
                         </div>
                     </div>
                 `;
-            } else if (state.view === 'playing') {
-                const isBattle = state.gameMode === 'battle';
-                const isMulti = state.gameMode === 'multiplayer';
-                const isBoss = BOSS_LEVELS.includes(state.currentLevel) && isBattle;
-                
-                app.innerHTML = `
-                    <div class="min-h-screen flex flex-col items-center p-4 ${theme}">
-                        <div class="w-full max-w-lg mb-4 flex items-center justify-between bg-white/5 p-4 rounded-3xl border-2 border-current/10">
-                            <button onclick="setView('${isBattle ? 'map' : 'menu'}')" class="p-2 bg-white/10 rounded-full"><i data-lucide="home"></i></button>
-                            <div class="text-center">
-                                <div class="text-[10px] font-black opacity-40 uppercase tracking-widest">${state.gameMode}</div>
-                                <div class="font-black text-sm">${isBoss ? `BOSS HP: ${state.bossHP}` : `LVL ${state.currentLevel}`}</div>
+            } else if (state.view.startsWith('setup')) {
+                const isMulti = state.view.includes('multi');
+                html = `
+                    <div class="space-y-12 animate-in slide-in-from-bottom">
+                        <button onclick="nav('menu')" class="p-3 bg-slate-900 rounded-full"><i data-lucide="arrow-left"></i></button>
+                        <h2 class="text-3xl font-black italic uppercase tracking-tighter">${isMulti ? 'Multiplayer' : 'Robot'} Rejimi</h2>
+                        <div class="space-y-8">
+                            <div>
+                                <p class="text-[10px] font-black opacity-30 uppercase tracking-[0.2em] mb-4">Grid Hajmi</p>
+                                <div class="grid grid-cols-3 gap-3">
+                                    <button onclick="setupTemp.size=3; upSetupUI(this, 's')" class="s-setup p-5 bg-slate-900 rounded-3xl font-black border-2 border-transparent setup-btn-active">3x3</button>
+                                    <button onclick="setupTemp.size=4; upSetupUI(this, 's')" class="s-setup p-5 bg-slate-900 rounded-3xl font-black border-2 border-transparent">4x4</button>
+                                    <button onclick="setupTemp.size=5; upSetupUI(this, 's')" class="s-setup p-5 bg-slate-900 rounded-3xl font-black border-2 border-transparent">5x5</button>
+                                </div>
                             </div>
-                            <button onclick="setView('shop')" class="p-2 bg-yellow-500 text-black rounded-full shadow-lg"><i data-lucide="shopping-cart"></i></button>
+                            ${!isMulti ? `
+                            <div>
+                                <p class="text-[10px] font-black opacity-30 uppercase tracking-[0.2em] mb-4">Robot Darajasi</p>
+                                <div class="grid grid-cols-2 gap-2">
+                                    ${DIFFICULTIES.map(d => `<button onclick="setupTemp.diff='${d}'; upSetupUI(this, 'd')" class="d-setup p-4 rounded-3xl border-2 font-bold text-xs ${d==='O\'RTA' ? 'setup-btn-active border-indigo-400' : 'bg-slate-900 border-transparent'}">${d}</button>`).join('')}
+                                </div>
+                            </div>
+                            ` : ''}
+                            <button onclick="${isMulti ? 'startMultiMode()' : 'startRobotMode()'}" class="w-full bg-white text-black p-6 rounded-[2.5rem] font-black text-xl shadow-2xl hover:bg-slate-200 active:scale-95 transition-all">BOSHLASH</button>
+                        </div>
+                    </div>
+                `;
+            } else if (state.view === 'game') {
+                const isMulti = game.mode === 'multi';
+                html = `
+                    <div class="flex-1 flex flex-col items-center">
+                        <div class="w-full flex items-center justify-between mb-4 bg-slate-900/50 p-4 rounded-3xl border border-white/5">
+                            <button onclick="nav('menu')" class="p-2 opacity-50"><i data-lucide="home"></i></button>
+                            <div class="text-center flex-1">
+                                <div class="text-[8px] font-bold opacity-30 uppercase tracking-[0.4em]">${game.diff}</div>
+                                <div class="font-black text-sm uppercase">${game.bossHP > 0 ? 'BOSS STAGE' : `STAGE`}</div>
+                                ${game.bossHP > 0 ? `<div class="flex justify-center gap-1 mt-1">${[1,2,3].map(h => `<i data-lucide="heart" class="w-4 h-4 ${h <= game.bossHP ? 'text-red-500 fill-red-500' : 'text-slate-800'}"></i>`).join('')}</div>` : ''}
+                            </div>
+                            <button onclick="nav('shop')" class="p-2 bg-yellow-500 text-black rounded-full shadow-lg active:scale-90"><i data-lucide="shopping-cart" class="w-4"></i></button>
                         </div>
 
-                        ${isBoss ? `
-                            <div class="flex gap-2 mb-4 boss-shake">
-                                ${Array.from({ length: 3 }).map((_, i) => `<i data-lucide="heart" class="${i < state.bossHP ? "text-red-500 fill-red-500" : "text-slate-800"}"></i>`).join('')}
+                        ${isMulti ? `
+                        <div class="w-full mb-2 p-3 rounded-2xl border-2 transition-all ${game.isXNext ? 'player-active-glow' : 'opacity-20'}">
+                            <div class="flex items-center justify-between mb-2">
+                                <div class="flex items-center gap-2"><i data-lucide="x" class="text-blue-400"></i> <span class="text-[10px] font-black uppercase tracking-widest">Player X Inventari</span></div>
+                                <span class="text-[10px] font-black text-yellow-500 tracking-tighter">🪙 ${state.multiData.coinsX}</span>
                             </div>
+                            <div class="flex gap-2">${renderInv('X', state.multiData.invX)}</div>
+                        </div>
                         ` : ''}
 
-                        <div class="w-full max-w-md flex justify-between mb-8 px-2">
-                            <div class="flex flex-col items-center p-4 rounded-3xl border-2 w-[48%] transition-all ${state.isXNext && !state.winnerInfo ? 'border-blue-500 bg-blue-500/10 scale-105 ring-4 ring-blue-500/20' : 'border-transparent opacity-40'}">
-                                ${getIcon('X', 40)}
-                                <div class="text-[10px] font-black mt-2">PLAYER X</div>
-                                <div class="text-yellow-500 font-black text-xs">${isBattle ? state.battleProfile.coins : isMulti ? state.multiProfile.coinsX : state.pveProfile.coins} 🪙</div>
+                        <div class="w-full flex justify-between mb-4 px-2">
+                            <div class="w-[48%] p-3 rounded-2xl border-2 transition-all ${game.isXNext ? 'border-indigo-500 bg-indigo-500/10' : 'border-transparent opacity-20'}">
+                                <div class="flex justify-center mb-1"><i data-lucide="x" class="text-indigo-400 w-8 h-8"></i></div>
+                                <div class="text-center font-bold text-[9px] uppercase tracking-widest">PLAYER X</div>
                             </div>
-                            <div class="flex flex-col items-center p-4 rounded-3xl border-2 w-[48%] transition-all ${!state.isXNext && !state.winnerInfo ? 'border-red-500 bg-red-500/10 scale-105 ring-4 ring-red-500/20' : 'border-transparent opacity-40'}">
-                                ${getIcon('O', 40)}
-                                <div class="text-[10px] font-black mt-2">${isMulti ? "PLAYER O" : "ROBOT"}</div>
-                                <div class="text-yellow-500 font-black text-xs">${isMulti ? state.multiProfile.coinsO : 0} 🪙</div>
+                            <div class="w-[48%] p-3 rounded-2xl border-2 transition-all ${!game.isXNext ? 'border-red-500 bg-red-500/10' : 'border-transparent opacity-20'}">
+                                <div class="flex justify-center mb-1"><i data-lucide="circle" class="text-red-400 w-8 h-8"></i></div>
+                                <div class="text-center font-bold text-[9px] uppercase tracking-widest">${isMulti ? 'PLAYER O' : 'ROBOT'}</div>
                             </div>
                         </div>
 
-                        <div class="grid gap-2 sm:gap-3 bg-white/5 p-3 rounded-[3rem] border-2 border-current/10 w-full max-w-md aspect-square mb-6" style="grid-template-columns: repeat(${state.gridSize}, 1fr)">
-                            ${state.board.map((val, i) => `
-                                <button onclick="handleMove(${i})" class="grid-cell flex items-center justify-center rounded-2xl transition-all relative ${!val && !state.winnerInfo ? 'bg-white/5 hover:bg-white/10' : 'bg-white/10'} ${state.winnerInfo?.line?.includes(i) ? 'bg-indigo-600 ring-4 ring-white' : ''}">
-                                    <div class="animate-pop">${getIcon(val, state.gridSize > 4 ? 24 : 36)}</div>
-                                    ${state.shielded.includes(i) ? '<i data-lucide="shield-check" class="absolute top-1 right-1 text-emerald-500 animate-bounce" style="width:16px;height:16px"></i>' : ''}
+                        <div class="grid gap-2 w-full aspect-square bg-slate-950 p-2 rounded-[2.5rem] border border-white/5 shadow-2xl" style="grid-template-columns: repeat(${game.gridSize}, 1fr)">
+                            ${game.board.map((v, i) => `
+                                <button onclick="cellClick(${i})" class="grid-cell bg-slate-900 rounded-[1.5rem] flex items-center justify-center relative ${game.winner?.line?.includes(i) ? 'win-animate z-10' : ''}">
+                                    ${v === 'X' ? '<i data-lucide="x" class="text-indigo-400 w-12 h-12"></i>' : v === 'O' ? '<i data-lucide="circle" class="text-red-400 w-12 h-12"></i>' : ''}
+                                    ${game.shielded.includes(i) ? '<i data-lucide="shield-check" class="absolute top-2 right-2 text-emerald-500 w-4 h-4 animate-pulse"></i>' : ''}
                                 </button>
                             `).join('')}
                         </div>
 
-                        <div class="w-full max-w-md space-y-4">
-                            ${isMulti ? renderMultiInv() : renderSingleInv()}
-                        </div>
-
-                        ${state.winnerInfo ? `
-                            <div class="fixed inset-0 bg-black/90 backdrop-blur-md z-50 flex flex-col items-center justify-center p-10 text-center">
-                                ${state.winnerInfo.winner === 'X' ? '<i data-lucide="trophy" class="text-yellow-400 mb-6" style="width:100px;height:100px"></i><h2 class="text-5xl font-black text-green-400 mb-4 uppercase">G\'alaba!</h2>' : 
-                                  state.winnerInfo.winner === 'Draw' ? '<div class="text-8xl mb-6">🤝</div><h2 class="text-5xl font-black mb-4 uppercase">Durang!</h2>' : 
-                                  '<i data-lucide="skull" class="text-red-500 mb-6" style="width:100px;height:100px"></i><h2 class="text-5xl font-black text-red-500 mb-4 uppercase italic">Mag\'lubiyat!</h2>'}
-                                <button onclick="setView('${isBattle ? 'map' : 'menu'}')" class="px-12 py-5 bg-blue-600 text-white rounded-full font-black text-xl shadow-xl hover:scale-105 transition-all">DAVOM ETISH</button>
+                        ${isMulti ? `
+                        <div class="w-full mt-4 p-3 rounded-2xl border-2 transition-all ${!game.isXNext ? 'player-active-glow' : 'opacity-20'}">
+                            <div class="flex items-center justify-between mb-2">
+                                <div class="flex items-center gap-2"><i data-lucide="circle" class="text-red-400"></i> <span class="text-[10px] font-black uppercase tracking-widest">Player O Inventari</span></div>
+                                <span class="text-[10px] font-black text-yellow-500 tracking-tighter">🪙 ${state.multiData.coinsO}</span>
                             </div>
-                        ` : ''}
+                            <div class="flex gap-2">${renderInv('O', state.multiData.invO)}</div>
+                        </div>
+                        ` : `
+                        <div class="mt-8 grid grid-cols-4 gap-3 w-full">
+                            ${['eraser', 'freeze', 'shield', 'meteor'].map(art => `
+                                <button onclick="useArt('${art}')" ${state.inventory[art] <= 0 || game.isThinking ? 'disabled' : ''} class="flex flex-col items-center p-4 rounded-3xl border-2 transition-all ${game.activeArt === art ? 'art-active' : 'bg-slate-900 border-slate-800'} ${state.inventory[art] <= 0 ? 'opacity-10' : ''}">
+                                    <i data-lucide="${art==='eraser'?'eraser':art==='freeze'?'snowflake':art==='shield'?'shield-check':'sparkles'}" class="w-5 h-5 mb-1"></i>
+                                    <span class="text-[10px] font-black">${state.inventory[art]}</span>
+                                </button>
+                            `).join('')}
+                        </div>
+                        `}
                     </div>
+
+                    ${game.winner ? `
+                        <div class="fixed inset-0 z-50 bg-black/95 backdrop-blur-xl flex flex-col items-center justify-center p-10 text-center animate-in zoom-in">
+                            <i data-lucide="${game.winner.p === 'X' ? 'trophy' : game.winner.p === 'Durang' ? 'minus' : 'skull'}" class="w-24 h-24 mb-6 ${game.winner.p === 'X' ? 'text-yellow-400 animate-bounce' : 'text-red-500'}"></i>
+                            <h2 class="text-5xl font-black ${game.winner.p === 'X' ? 'text-indigo-400' : 'text-red-500'} mb-2 italic tracking-tighter uppercase">${game.winner.p === 'Durang' ? 'DURANG' : game.winner.p === 'X' ? 'G\'ALABA' : 'MAG\'LUBIYAT'}</h2>
+                            ${game.bossHP > 0 && game.winner.p === 'X' ? `<p class="opacity-50 text-sm">Bossning yana ${game.bossHP} joni qoldi!</p>` : ''}
+                            <button onclick="handleContinue()" class="px-16 py-5 bg-indigo-600 rounded-full font-black text-xl shadow-2xl mt-10 hover:scale-105 active:scale-95 transition-transform">DAVOM ETISH</button>
+                        </div>
+                    ` : ''}
                 `;
             } else if (state.view === 'shop') {
-                const isBattle = state.gameMode === 'battle';
-                const prices = isBattle ? PRICES.elite : PRICES.standard;
-                
-                app.innerHTML = `
-                    <div class="min-h-screen p-8 ${theme}">
-                        <div class="max-w-md mx-auto">
-                            <button onclick="setView('playing')" class="mb-6 font-black flex items-center gap-2 opacity-50"><i data-lucide="chevron-left"></i> ORTGA</button>
-                            <h2 class="text-4xl font-black italic uppercase mb-8 border-b-2 border-current pb-4">${isBattle ? "ELITE BOZOR" : "MARKET"}</h2>
-                            <div class="space-y-6">
-                                ${renderShopSection('X', prices)}
-                                ${state.gameMode === 'multiplayer' ? renderShopSection('O', prices) : ''}
-                            </div>
+                const isMulti = game.mode === 'multi';
+                html = `
+                    <div class="space-y-10 animate-in fade-in">
+                        <div class="flex justify-between items-center">
+                            <button onclick="nav('game')" class="p-3 bg-slate-900 rounded-full"><i data-lucide="arrow-left"></i></button>
+                            <h2 class="text-3xl font-black italic uppercase tracking-tighter">Bozor</h2>
+                        </div>
+                        <div class="space-y-6">
+                            ${isMulti ? `
+                                <div class="bg-blue-600/10 p-4 rounded-3xl border border-blue-500/20">
+                                    <p class="text-xs font-black text-blue-400 mb-4 uppercase tracking-widest">Player X (🪙 ${state.multiData.coinsX})</p>
+                                    <div class="grid gap-2">${renderShopItems('X')}</div>
+                                </div>
+                                <div class="bg-red-600/10 p-4 rounded-3xl border border-red-500/20">
+                                    <p class="text-xs font-black text-red-400 mb-4 uppercase tracking-widest">Player O (🪙 ${state.multiData.coinsO})</p>
+                                    <div class="grid gap-2">${renderShopItems('O')}</div>
+                                </div>
+                            ` : `
+                                <div class="bg-yellow-500/10 p-4 rounded-3xl border border-yellow-500/20 mb-4">
+                                    <p class="text-xs font-black text-yellow-500 mb-2 uppercase tracking-widest">Sizda: 🪙 ${state.coins}</p>
+                                </div>
+                                <div class="grid gap-2">${renderShopItems('X')}</div>
+                            `}
                         </div>
                     </div>
                 `;
             }
+
+            ui.innerHTML = html;
             lucide.createIcons();
         }
 
-        function renderSingleInv() {
-            const isBattle = state.gameMode === 'battle';
-            const inv = isBattle ? state.battleProfile.inventory : state.pveProfile.inventory;
-            return `
-                <div class="grid grid-cols-4 sm:grid-cols-7 gap-2">
-                    ${renderPowerBtn('eraser', inv.eraser, 'pink')}
-                    ${renderPowerBtn('freeze', inv.freeze, 'cyan')}
-                    ${renderPowerBtn('shield', inv.shield, 'emerald')}
-                    ${renderPowerBtn('zap', inv.zap, 'orange')}
-                    ${isBattle ? `
-                        ${renderPowerBtn('meteor', inv.meteor, 'purple')}
-                        ${renderPowerBtn('rewind', inv.rewind, 'blue')}
-                        ${renderPowerBtn('ghost', inv.ghost, 'slate')}
-                    ` : ''}
-                </div>
-            `;
-        }
-
-        function renderMultiInv() {
-            return `
-                <div class="space-y-4">
-                    <div class="p-4 rounded-3xl border-2 ${state.isXNext ? 'border-blue-500 bg-blue-500/5' : 'opacity-50'}">
-                        <p class="text-[10px] font-black text-blue-500 mb-2 tracking-widest uppercase">X Inventari</p>
-                        <div class="grid grid-cols-4 gap-2">
-                            ${renderPowerBtn('eraser', state.multiProfile.invX.eraser, 'pink', 'X')}
-                            ${renderPowerBtn('freeze', state.multiProfile.invX.freeze, 'cyan', 'X')}
-                            ${renderPowerBtn('shield', state.multiProfile.invX.shield, 'emerald', 'X')}
-                            ${renderPowerBtn('zap', state.multiProfile.invX.zap, 'orange', 'X')}
-                        </div>
-                    </div>
-                    <div class="p-4 rounded-3xl border-2 ${!state.isXNext ? 'border-red-500 bg-red-500/5' : 'opacity-50'}">
-                        <p class="text-[10px] font-black text-red-500 mb-2 tracking-widest uppercase">O Inventari</p>
-                        <div class="grid grid-cols-4 gap-2">
-                            ${renderPowerBtn('eraser', state.multiProfile.invO.eraser, 'pink', 'O')}
-                            ${renderPowerBtn('freeze', state.multiProfile.invO.freeze, 'cyan', 'O')}
-                            ${renderPowerBtn('shield', state.multiProfile.invO.shield, 'emerald', 'O')}
-                            ${renderPowerBtn('zap', state.multiProfile.invO.zap, 'orange', 'O')}
-                        </div>
-                    </div>
-                </div>
-            `;
-        }
-
-        function renderPowerBtn(p, count, color, owner = 'X') {
-            const icons = { eraser: 'eraser', freeze: 'snowflake', shield: 'shield-check', zap: 'zap', meteor: 'sparkles', rewind: 'history', ghost: 'ghost' };
-            const isActive = state.activeArtifact === p && ((owner === 'X' && state.isXNext) || (owner === 'O' && !state.isXNext));
-            const colors = {
-                pink: 'border-pink-500 text-pink-500', cyan: 'border-cyan-500 text-cyan-500', emerald: 'border-emerald-500 text-emerald-500',
-                orange: 'border-orange-500 text-orange-500', purple: 'border-purple-500 text-purple-500', blue: 'border-blue-500 text-blue-500', slate: 'border-slate-500 text-slate-500'
-            };
-            return `
-                <button onclick="usePower('${p}', '${owner}')" ${count <= 0 ? 'disabled' : ''} class="p-2 border-2 rounded-2xl flex flex-col items-center gap-1 transition-all ${isActive ? 'bg-current text-white scale-110 shadow-lg' : colors[color]} ${count <= 0 ? 'opacity-20 grayscale' : 'hover:scale-110 active:scale-95'}">
-                    <i data-lucide="${icons[p]}" style="width:20px;height:20px"></i>
-                    <span class="text-[9px] font-black">${count}</span>
+        function renderInv(player, inv) {
+            return ['eraser', 'freeze', 'shield'].map(art => `
+                <button onclick="useArt('${art}', '${player}')" ${inv[art] <= 0 || (game.isXNext ? 'X':'O') !== player ? 'disabled' : ''} class="flex-1 flex items-center justify-center gap-1 px-3 py-2 rounded-xl border-2 transition-all ${game.activeArt === art && (game.isXNext ? 'X':'O') === player ? 'art-active' : 'bg-slate-800 border-slate-700'} ${inv[art] <= 0 ? 'opacity-10' : ''}">
+                    <i data-lucide="${art==='eraser'?'eraser':art==='freeze'?'snowflake':'shield-check'}" class="w-3 h-3"></i>
+                    <span class="text-[9px] font-bold">${inv[art]}</span>
                 </button>
-            `;
+            `).join('');
         }
 
-        function renderShopSection(player, prices) {
-            let coins = state.gameMode === 'battle' ? state.battleProfile.coins : (player === 'X' ? state.multiProfile.coinsX : state.multiProfile.coinsO);
-            return `
-                <div class="bg-white/5 p-6 rounded-3xl border-2 ${player === 'X' ? 'border-blue-500/20' : 'border-red-500/20'}">
-                    <div class="flex justify-between items-center mb-4">
-                        <h3 class="font-black ${player === 'X' ? 'text-blue-500' : 'text-red-500'} uppercase">PLAYER ${player}</h3>
-                        <div class="text-yellow-500 font-black"><i data-lucide="coins" class="inline mb-1" style="width:16px;height:16px"></i> ${coins}</div>
+        function renderShopItems(player) {
+            const isMulti = game.mode === 'multi';
+            const coins = isMulti ? (player === 'X' ? state.multiData.coinsX : state.multiData.coinsO) : state.coins;
+            return Object.entries(PRICES).map(([k, v]) => `
+                <div class="bg-slate-900 p-4 rounded-2xl border border-white/5 flex items-center justify-between">
+                    <div class="flex items-center gap-3">
+                        <i data-lucide="${k==='eraser'?'eraser':k==='freeze'?'snowflake':k==='shield'?'shield-check':'sparkles'}" class="w-5 h-5"></i>
+                        <span class="font-bold capitalize text-sm">${k}</span>
                     </div>
-                    <div class="grid gap-2">
-                        ${Object.entries(prices).map(([item, price]) => `
-                            <div class="flex items-center justify-between bg-white/5 p-4 rounded-2xl border border-white/5">
-                                <div class="flex items-center gap-3">
-                                    <div class="p-2 bg-white/10 rounded-xl"><i data-lucide="${item === 'eraser' ? 'eraser' : item === 'freeze' ? 'snowflake' : item === 'shield' ? 'shield-check' : item === 'zap' ? 'zap' : item === 'meteor' ? 'sparkles' : item === 'rewind' ? 'history' : 'ghost'}"></i></div>
-                                    <div class="font-bold text-sm uppercase">${item}</div>
-                                </div>
-                                <button onclick="buyItem('${player}', '${item}', ${price})" ${coins < price ? 'disabled' : ''} class="px-5 py-2 rounded-xl font-black text-xs transition-all ${coins >= price ? 'bg-indigo-600 text-white shadow-lg' : 'bg-white/10 opacity-30'}">${price} 🪙</button>
-                            </div>
-                        `).join('')}
-                    </div>
+                    <button onclick="buy('${k}', '${player}')" ${coins < v ? 'disabled' : ''} class="px-4 py-2 bg-yellow-500 text-black rounded-xl font-black text-[10px] ${coins < v ? 'opacity-20' : 'active:scale-95 transition-transform'}">${v} 🪙</button>
                 </div>
-            `;
+            `).join('');
         }
 
-        // --- START ---
-        window.onload = render;
+        window.upSetupUI = (el, type) => {
+            const cls = type === 's' ? '.s-setup' : '.d-setup';
+            document.querySelectorAll(cls).forEach(b => {
+                b.classList.remove('setup-btn-active');
+                b.classList.replace('border-indigo-400', 'border-transparent');
+            });
+            el.classList.add('setup-btn-active');
+            if(type === 'd') el.classList.replace('border-transparent', 'border-indigo-400');
+        };
+
+        render();
     </script>
 </body>
 </html>
